@@ -1,14 +1,14 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
 from datetime import date, timedelta
 import urllib.parse
+from supabase import create_client, Client
 
 # ==========================================
 # 1. CONFIGURACIÓN GENERAL DE LA PÁGINA
 # ==========================================
 st.set_page_config(
-    page_title="OmniCast PRO V4 | Gestión Total",
+    page_title="OmniCast PRO Cloud | Supabase",
     page_icon="🚀",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -41,7 +41,7 @@ def pantalla_login():
     
     col1, col2, col3 = st.columns([1, 1.3, 1])
     with col2:
-        st.markdown('<div class="login-box"><div class="login-title">🚀 OmniCast PRO</div><div class="login-sub">Panel Privado de Administración</div></div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-box"><div class="login-title">🚀 OmniCast PRO</div><div class="login-sub">Acceso Privado Conectado a Supabase</div></div>', unsafe_allow_html=True)
         with st.form("login_form"):
             usuario = st.text_input("👤 Usuario", placeholder="Ingresa tu usuario")
             clave = st.text_input("🔑 Contraseña", type="password", placeholder="Ingresa tu contraseña")
@@ -59,91 +59,70 @@ if not st.session_state.autenticado:
     st.stop()
 
 # ==========================================
-# 3. BASE DE DATOS Y PRECARGA DE TUS DATOS ACTUALES
+# 3. CONEXIÓN A SUPABASE Y PRECARGA INICIAL
 # ==========================================
-conn = sqlite3.connect('omnicast_v4_master.db', check_same_thread=False)
-c = conn.cursor()
+if "SUPABASE_URL" not in st.secrets or "SUPABASE_KEY" not in st.secrets:
+    st.error("⚠️ Falta configurar las credenciales de Supabase en los 'Secrets' de Streamlit Cloud.")
+    st.info("""
+    **Cómo activarlo en 30 segundos:**
+    1. Haz clic en **Manage app** (abajo a la derecha) -> **Settings** -> **Secrets**.
+    2. Pega tus llaves así y dale a **Save**:
+    ```toml
+    SUPABASE_URL = "[https://tu-proyecto.supabase.co](https://tu-proyecto.supabase.co)"
+    SUPABASE_KEY = "tu-clave-anon-public"
+    ```
+    """)
+    st.stop()
 
-c.execute('''CREATE TABLE IF NOT EXISTS ventas (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    codigo_vta TEXT,
-    cliente TEXT,
-    whatsapp TEXT,
-    plataforma TEXT,
-    correo_cuenta TEXT,
-    clave_acceso TEXT,
-    perfil TEXT,
-    pin TEXT,
-    dispositivo TEXT,
-    fecha_venta DATE,
-    fecha_vencimiento DATE,
-    precio_venta REAL,
-    costo_prop REAL,
-    metodo_pago TEXT,
-    estado_pago TEXT,
-    notas_2fa TEXT
-)''')
+@st.cache_resource
+def iniciar_supabase() -> Client:
+    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
-c.execute('''CREATE TABLE IF NOT EXISTS cuentas_madre (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    codigo_mad TEXT,
-    plataforma TEXT,
-    correo_madre TEXT UNIQUE,
-    clave_actual TEXT,
-    proveedor TEXT,
-    fecha_corte DATE,
-    capacidad_cupos INTEGER,
-    costo_madre REAL,
-    notas_recuperacion TEXT
-)''')
-conn.commit()
+supabase = iniciar_supabase()
 
-def precargar_datos_actuales():
-    # Precargar Cuentas Madre si la tabla está vacía
-    c.execute("SELECT COUNT(*) FROM cuentas_madre")
-    if c.fetchone()[0] == 0:
-        madres_iniciales = [
-            ("MAD-001", "Netflix", "hussainrazamonthly1@gmail.com", "sszzxx", "Proveedor Mayorista 1", "2026-11-30", 1, 7.00, "https://taikhoan24h.vn"),
-            ("MAD-002", "Netflix", "hussainrazamonthly2@gmail.com", "sszzxx", "Proveedor Mayorista 1", "2026-11-30", 1, 7.00, "https://taikhoan24h.vn"),
-            ("MAD-003", "Netflix", "hussainrazamonthly3@gmail.com", "sszzxx", "Proveedor Mayorista 1", "2026-11-30", 1, 7.00, "https://taikhoan24h.vn"),
-            ("MAD-004", "Netflix", "QGXWL84PTN@gmail.com", "https://www.netflix.com/unsupported", "Proveedor Mayorista 2", "2026-11-30", 1, 7.00, "https://cheapnetf.pages.dev/"),
-            ("MAD-005", "Netflix", "taikhoanflix0+29@gmail.com", "1niemvui", "Proveedor Mayorista 1", "2026-12-01", 1, 7.00, "https://taikhoan24h.vn"),
-            ("MAD-006", "Netflix", "hussainrazamonthly150@gmail.com", "1minhem", "Proveedor Mayorista 1", "2026-12-02", 1, 7.00, "https://taikhoan24h.vn"),
-            ("MAD-007", "Netflix", "Q2CH3KC279@gmail.com", "https://www.netflix.com/unsupported?nft", "Proveedor Mayorista 2", "2026-12-03", 1, 7.00, "https://cheapnetf.pages.dev/"),
-            ("MAD-008", "Netflix", "FQBDW6QLJ5@gmail.com", "https://www.netflix.com/tv2?nftoken=Bgi", "Proveedor Mayorista 2", "2026-12-03", 1, 7.00, "https://cheapnetf.pages.dev/"),
-            ("MAD-009", "Disney+", "dsntrapflix002@seiyafuzyom.com", "azulito113", "Panel", "2026-12-06", 5, 10.00, "")
-        ]
-        c.executemany('''INSERT INTO cuentas_madre 
-            (codigo_mad, plataforma, correo_madre, clave_actual, proveedor, fecha_corte, capacidad_cupos, costo_madre, notas_recuperacion)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', madres_iniciales)
-        conn.commit()
+def precargar_datos_supabase():
+    try:
+        # 1. Verificar y precargar Cuentas Madre si está vacío
+        res_m = supabase.table("cuentas_madre").select("id").limit(1).execute()
+        if len(res_m.data) == 0:
+            madres_iniciales = [
+                {"codigo_mad": "MAD-001", "plataforma": "Netflix", "correo_madre": "hussainrazamonthly1@gmail.com", "clave_actual": "sszzxx", "proveedor": "Proveedor Mayorista 1", "fecha_corte": "2026-11-30", "capacidad_cupos": 1, "costo_madre": 7.00, "notas_recuperacion": "https://taikhoan24h.vn"},
+                {"codigo_mad": "MAD-002", "plataforma": "Netflix", "correo_madre": "hussainrazamonthly2@gmail.com", "clave_actual": "sszzxx", "proveedor": "Proveedor Mayorista 1", "fecha_corte": "2026-11-30", "capacidad_cupos": 1, "costo_madre": 7.00, "notas_recuperacion": "https://taikhoan24h.vn"},
+                {"codigo_mad": "MAD-003", "plataforma": "Netflix", "correo_madre": "hussainrazamonthly3@gmail.com", "clave_actual": "sszzxx", "proveedor": "Proveedor Mayorista 1", "fecha_corte": "2026-11-30", "capacidad_cupos": 1, "costo_madre": 7.00, "notas_recuperacion": "https://taikhoan24h.vn"},
+                {"codigo_mad": "MAD-004", "plataforma": "Netflix", "correo_madre": "QGXWL84PTN@gmail.com", "clave_actual": "https://www.netflix.com/unsupported", "proveedor": "Proveedor Mayorista 2", "fecha_corte": "2026-11-30", "capacidad_cupos": 1, "costo_madre": 7.00, "notas_recuperacion": "https://cheapnetf.pages.dev/"},
+                {"codigo_mad": "MAD-005", "plataforma": "Netflix", "correo_madre": "taikhoanflix0+29@gmail.com", "clave_actual": "1niemvui", "proveedor": "Proveedor Mayorista 1", "fecha_corte": "2026-12-01", "capacidad_cupos": 1, "costo_madre": 7.00, "notas_recuperacion": "https://taikhoan24h.vn"},
+                {"codigo_mad": "MAD-006", "plataforma": "Netflix", "correo_madre": "hussainrazamonthly150@gmail.com", "clave_actual": "1minhem", "proveedor": "Proveedor Mayorista 1", "fecha_corte": "2026-12-02", "capacidad_cupos": 1, "costo_madre": 7.00, "notas_recuperacion": "https://taikhoan24h.vn"},
+                {"codigo_mad": "MAD-007", "plataforma": "Netflix", "correo_madre": "Q2CH3KC279@gmail.com", "clave_actual": "https://www.netflix.com/unsupported?nft", "proveedor": "Proveedor Mayorista 2", "fecha_corte": "2026-12-03", "capacidad_cupos": 1, "costo_madre": 7.00, "notas_recuperacion": "https://cheapnetf.pages.dev/"},
+                {"codigo_mad": "MAD-008", "plataforma": "Netflix", "correo_madre": "FQBDW6QLJ5@gmail.com", "clave_actual": "https://www.netflix.com/tv2?nftoken=Bgi", "proveedor": "Proveedor Mayorista 2", "fecha_corte": "2026-12-03", "capacidad_cupos": 1, "costo_madre": 7.00, "notas_recuperacion": "https://cheapnetf.pages.dev/"},
+                {"codigo_mad": "MAD-009", "plataforma": "Disney+", "correo_madre": "dsntrapflix002@seiyafuzyom.com", "clave_actual": "azulito113", "proveedor": "Panel", "fecha_corte": "2026-12-06", "capacidad_cupos": 5, "costo_madre": 10.00, "notas_recuperacion": ""}
+            ]
+            supabase.table("cuentas_madre").insert(madres_iniciales).execute()
 
-    # Precargar Ventas si la tabla está vacía
-    c.execute("SELECT COUNT(*) FROM ventas")
-    if c.fetchone()[0] == 0:
-        ventas_iniciales = [
-            ("VTA-001", "YOJANY", "51952529351", "Netflix", "hussainrazamonthly1@gmail.com", "sszzxx", "Perfil 5 - ######", "1122", "Smart TV", "2026-10-31", "2026-11-30", 12.00, 7.00, "Yape", "Pagado", "Cliente Nuevo"),
-            ("VTA-002", "RICARDO", "51959538866", "Netflix", "hussainrazamonthly2@gmail.com", "sszzxx", "Perfil 5 - ######", "-", "Celular / Laptop", "2026-10-31", "2026-11-30", 13.00, 7.00, "Plin", "Pagado", "Cliente Nuevo"),
-            ("VTA-003", "LIZ - RIC", "51928268758", "Netflix", "hussainrazamonthly3@gmail.com", "sszzxx", "Perfil 1 - Liz", "1122", "Tablet", "2026-10-31", "2026-11-30", 12.00, 7.00, "Yape", "Pagado", "Cliente Nuevo"),
-            ("VTA-004", "JAVIER", "51972174896", "Netflix", "QGXWL84PTN@gmail.com", "https://www.netflix.com/unsupported", "Perfil 4 - Javi", "-", "Celular", "2026-10-31", "2026-11-30", 13.00, 6.70, "Yape", "Pagado", "Cliente Nuevo | QGXWL84PTN - https://www.netflix"),
-            ("VTA-005", "ENZO", "51918664028", "Netflix", "taikhoanflix0+29@gmail.com", "1niemvui", "Perfil 1 - ######", "-", "Celular", "2026-11-01", "2026-12-01", 13.00, 7.00, "Yape", "Pagado", "Cliente Nuevo"),
-            ("VTA-006", "BRISSA", "51993464296", "Netflix", "hussainrazamonthly150@gmail.com", "1minhem", "Perfil 1 - ######", "1122", "Celular", "2026-11-02", "2026-12-02", 13.00, 7.00, "Yape", "Pagado", "Cliente Nuevo"),
-            ("VTA-007", "ROGER", "51983645735", "Netflix", "Q2CH3KC279@gmail.com", "https://www.netflix.com/unsupported?nft", "Perfil 1 - ######", "-", "Tablet", "2026-11-03", "2026-12-03", 13.00, 6.70, "Yape", "Pagado", "Cliente Nuevo | QGXWL84PTN - https://www.netflix"),
-            ("VTA-008", "JUNIOR", "51917838120", "Netflix", "FQBDW6QLJ5@gmail.com", "https://www.netflix.com/tv2?nftoken=Bgi", "Perfil 2 - ######", "-", "TV", "2026-11-03", "2026-12-03", 13.00, 6.70, "Yape", "Pagado", "Cliente Nuevo | QGXWL84PTN - https://www.netflix"),
-            ("VTA-009", "JUNIOR", "51917838120", "Disney+", "dsntrapflix002@seiyafuzyom.com", "azulito113", "Perfil 2 - Junior", "2233", "TV", "2026-11-06", "2026-12-06", 10.00, 10.00, "Yape", "Pagado", "Cliente Nuevo")
-        ]
-        c.executemany('''INSERT INTO ventas 
-            (codigo_vta, cliente, whatsapp, plataforma, correo_cuenta, clave_acceso, perfil, pin, dispositivo, fecha_venta, fecha_vencimiento, precio_venta, costo_prop, metodo_pago, estado_pago, notas_2fa)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', ventas_iniciales)
-        conn.commit()
+        # 2. Verificar y precargar Ventas si está vacío
+        res_v = supabase.table("ventas").select("id").limit(1).execute()
+        if len(res_v.data) == 0:
+            ventas_iniciales = [
+                {"codigo_vta": "VTA-001", "cliente": "YOJANY", "whatsapp": "51952529351", "plataforma": "Netflix", "correo_cuenta": "hussainrazamonthly1@gmail.com", "clave_acceso": "sszzxx", "perfil": "Perfil 5 - ######", "pin": "1122", "dispositivo": "Smart TV", "fecha_venta": "2026-10-31", "fecha_vencimiento": "2026-11-30", "precio_venta": 12.00, "costo_prop": 7.00, "metodo_pago": "Yape", "estado_pago": "Pagado", "notas_2fa": "Cliente Nuevo"},
+                {"codigo_vta": "VTA-002", "cliente": "RICARDO", "whatsapp": "51959538866", "plataforma": "Netflix", "correo_cuenta": "hussainrazamonthly2@gmail.com", "clave_acceso": "sszzxx", "perfil": "Perfil 5 - ######", "pin": "-", "dispositivo": "Celular / Laptop", "fecha_venta": "2026-10-31", "fecha_vencimiento": "2026-11-30", "precio_venta": 13.00, "costo_prop": 7.00, "metodo_pago": "Plin", "estado_pago": "Pagado", "notas_2fa": "Cliente Nuevo"},
+                {"codigo_vta": "VTA-003", "cliente": "LIZ - RIC", "whatsapp": "51928268758", "plataforma": "Netflix", "correo_cuenta": "hussainrazamonthly3@gmail.com", "clave_acceso": "sszzxx", "perfil": "Perfil 1 - Liz", "pin": "1122", "dispositivo": "Tablet", "fecha_venta": "2026-10-31", "fecha_vencimiento": "2026-11-30", "precio_venta": 12.00, "costo_prop": 7.00, "metodo_pago": "Yape", "estado_pago": "Pagado", "notas_2fa": "Cliente Nuevo"},
+                {"codigo_vta": "VTA-004", "cliente": "JAVIER", "whatsapp": "51972174896", "plataforma": "Netflix", "correo_cuenta": "QGXWL84PTN@gmail.com", "clave_acceso": "https://www.netflix.com/unsupported", "perfil": "Perfil 4 - Javi", "pin": "-", "dispositivo": "Celular", "fecha_venta": "2026-10-31", "fecha_vencimiento": "2026-11-30", "precio_venta": 13.00, "costo_prop": 6.70, "metodo_pago": "Yape", "estado_pago": "Pagado", "notas_2fa": "Cliente Nuevo | QGXWL84PTN - https://www.netflix"},
+                {"codigo_vta": "VTA-005", "cliente": "ENZO", "whatsapp": "51918664028", "plataforma": "Netflix", "correo_cuenta": "taikhoanflix0+29@gmail.com", "clave_acceso": "1niemvui", "perfil": "Perfil 1 - ######", "pin": "-", "dispositivo": "Celular", "fecha_venta": "2026-11-01", "fecha_vencimiento": "2026-12-01", "precio_venta": 13.00, "costo_prop": 7.00, "metodo_pago": "Yape", "estado_pago": "Pagado", "notas_2fa": "Cliente Nuevo"},
+                {"codigo_vta": "VTA-006", "cliente": "BRISSA", "whatsapp": "51993464296", "plataforma": "Netflix", "correo_cuenta": "hussainrazamonthly150@gmail.com", "clave_acceso": "1minhem", "perfil": "Perfil 1 - ######", "pin": "1122", "dispositivo": "Celular", "fecha_venta": "2026-11-02", "fecha_vencimiento": "2026-12-02", "precio_venta": 13.00, "costo_prop": 7.00, "metodo_pago": "Yape", "estado_pago": "Pagado", "notas_2fa": "Cliente Nuevo"},
+                {"codigo_vta": "VTA-007", "cliente": "ROGER", "whatsapp": "51983645735", "plataforma": "Netflix", "correo_cuenta": "Q2CH3KC279@gmail.com", "clave_acceso": "https://www.netflix.com/unsupported?nft", "perfil": "Perfil 1 - ######", "pin": "-", "dispositivo": "Tablet", "fecha_venta": "2026-11-03", "fecha_vencimiento": "2026-12-03", "precio_venta": 13.00, "costo_prop": 6.70, "metodo_pago": "Yape", "estado_pago": "Pagado", "notas_2fa": "Cliente Nuevo | QGXWL84PTN - https://www.netflix"},
+                {"codigo_vta": "VTA-008", "cliente": "JUNIOR", "whatsapp": "51917838120", "plataforma": "Netflix", "correo_cuenta": "FQBDW6QLJ5@gmail.com", "clave_acceso": "https://www.netflix.com/tv2?nftoken=Bgi", "perfil": "Perfil 2 - ######", "pin": "-", "dispositivo": "TV", "fecha_venta": "2026-11-03", "fecha_vencimiento": "2026-12-03", "precio_venta": 13.00, "costo_prop": 6.70, "metodo_pago": "Yape", "estado_pago": "Pagado", "notas_2fa": "Cliente Nuevo | QGXWL84PTN - https://www.netflix"},
+                {"codigo_vta": "VTA-009", "cliente": "JUNIOR", "whatsapp": "51917838120", "plataforma": "Disney+", "correo_cuenta": "dsntrapflix002@seiyafuzyom.com", "clave_acceso": "azulito113", "perfil": "Perfil 2 - Junior", "pin": "2233", "dispositivo": "TV", "fecha_venta": "2026-11-06", "fecha_vencimiento": "2026-12-06", "precio_venta": 10.00, "costo_prop": 10.00, "metodo_pago": "Yape", "estado_pago": "Pagado", "notas_2fa": "Cliente Nuevo"}
+            ]
+            supabase.table("ventas").insert(ventas_iniciales).execute()
+    except Exception as e:
+        st.warning(f"Verifica haber ejecutado el script SQL en Supabase. Detalle: {e}")
 
-precargar_datos_actuales()
+precargar_datos_supabase()
 
 # ==========================================
 # 4. MENÚ LATERAL Y SELECTOR DE MODO OSCURO / CLARO
 # ==========================================
-st.sidebar.markdown("## 🚀 **OmniCast PRO V4**")
-st.sidebar.caption("Usuario activo: **lewis123**")
+st.sidebar.markdown("## 🚀 **OmniCast Cloud**")
+st.sidebar.caption("🟢 Conectado a Supabase | Usuario: **lewis123**")
 
 modo_tema = st.sidebar.toggle("☀️ Activar Modo Claro", value=False)
 
@@ -216,25 +195,27 @@ if st.sidebar.button("🔒 Cerrar Sesión", use_container_width=True):
 
 PLATAFORMAS = ["Netflix", "Disney+", "Prime Video", "HBO Max", "Crunchyroll", "Spotify", "YouTube Premium", "Canva Pro", "ChatGPT Plus", "Paramount+", "Vix+", "Apple TV+"]
 
-# ==========================================
-# 5. FUNCIONES DE CÁLCULO
-# ==========================================
 MESES_ES = {
     1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
     5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto",
     9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
 }
 
+# ==========================================
+# 5. FUNCIONES DE LECTURA EN SUPABASE
+# ==========================================
 def cargar_ventas():
-    df = pd.read_sql_query("SELECT * FROM ventas", conn)
+    res = supabase.table("ventas").select("*").execute()
+    df = pd.DataFrame(res.data)
     if not df.empty:
         hoy = pd.to_datetime(date.today())
+        df['precio_venta'] = pd.to_numeric(df['precio_venta'], errors='coerce').fillna(0.0)
+        df['costo_prop'] = pd.to_numeric(df['costo_prop'], errors='coerce').fillna(0.0)
         df['fecha_venta_dt'] = pd.to_datetime(df['fecha_venta'])
         df['fecha_vencimiento_dt'] = pd.to_datetime(df['fecha_vencimiento'])
         df['dias_restantes'] = (df['fecha_vencimiento_dt'] - hoy).dt.days
         df['ganancia_neta'] = df['precio_venta'] - df['costo_prop']
         
-        # Columna Mes-Año para Ganancias Mensuales
         df['mes_anio'] = df['fecha_venta_dt'].dt.strftime('%Y-%m')
         df['mes_nombre'] = df['fecha_venta_dt'].apply(lambda d: f"{MESES_ES[d.month]} {d.year}")
         
@@ -251,17 +232,23 @@ def cargar_ventas():
     return df
 
 def cargar_madres():
-    df_m = pd.read_sql_query("SELECT * FROM cuentas_madre", conn)
-    df_v = pd.read_sql_query("SELECT * FROM ventas", conn)
+    res_m = supabase.table("cuentas_madre").select("*").execute()
+    res_v = supabase.table("ventas").select("*").execute()
+    df_m = pd.DataFrame(res_m.data)
+    df_v = pd.DataFrame(res_v.data)
+    
     if not df_m.empty:
         hoy = pd.to_datetime(date.today())
+        df_m['capacidad_cupos'] = pd.to_numeric(df_m['capacidad_cupos'], errors='coerce').fillna(1).astype(int)
+        df_m['costo_madre'] = pd.to_numeric(df_m['costo_madre'], errors='coerce').fillna(0.0)
         df_m['dias_corte'] = (pd.to_datetime(df_m['fecha_corte']) - hoy).dt.days
         
         ocupados_list = []
         ingresos_list = []
         for _, row in df_m.iterrows():
             if not df_v.empty:
-                ventas_cuenta = df_v[df_v['correo_cuenta'].str.lower() == str(row['correo_madre']).lower()]
+                df_v['precio_venta'] = pd.to_numeric(df_v['precio_venta'], errors='coerce').fillna(0.0)
+                ventas_cuenta = df_v[df_v['correo_cuenta'].astype(str).str.lower() == str(row['correo_madre']).lower()]
                 ocupados = len(ventas_cuenta)
                 ingresos = ventas_cuenta['precio_venta'].sum()
             else:
@@ -277,6 +264,7 @@ def cargar_madres():
         df_m['disponibilidad'] = df_m['cupos_libres'].apply(
             lambda x: f"🟢 DISPONIBLE ({x} libres)" if x > 0 else "🔴 LLENA (SIN CUPOS)"
         )
+        df_m = df_m.sort_values(by='id', ascending=True)
     return df_m
 
 # ==========================================
@@ -288,7 +276,6 @@ if menu == "📊 Dashboard y Ganancias Mensuales":
     df_m = cargar_madres()
     
     if not df_v.empty:
-        # Filtro de Mes en la parte superior
         col_f1, col_f2 = st.columns([1.2, 2.8])
         with col_f1:
             meses_disponibles = ["🌎 Todos los Meses (Histórico)"] + sorted(df_v['mes_anio'].unique().tolist(), reverse=True)
@@ -308,7 +295,6 @@ if menu == "📊 Dashboard y Ganancias Mensuales":
         por_vencer = len(df_v[df_v['dias_restantes'] <= 5])
         cupos_libres_tot = int(df_m['cupos_libres'].clip(lower=0).sum()) if not df_m.empty else 0
 
-        # 5 Tarjetas de Alto Impacto
         c1, c2, c3, c4, c5 = st.columns(5)
         with c1:
             st.markdown(f'<div class="metric-card card-blue"><div class="metric-title">💰 Ingresos ({etiqueta_periodo})</div><div class="metric-value">S/ {ingresos_tot:.2f}</div><div class="metric-sub">{len(df_filtrado)} ventas registradas</div></div>', unsafe_allow_html=True)
@@ -323,7 +309,6 @@ if menu == "📊 Dashboard y Ganancias Mensuales":
 
         st.divider()
 
-        # SECCIÓN ESTRELLA: TABLA Y GRÁFICO DE GANANCIAS MENSUALES
         st.subheader("📆 Consolidado de Ganancias Mensuales (Mes a Mes)")
         resumen_mensual = df_v.groupby(['mes_anio', 'mes_nombre'], as_index=False).agg(
             ventas_totales=('id', 'count'),
@@ -356,7 +341,6 @@ if menu == "📊 Dashboard y Ganancias Mensuales":
 
         st.divider()
 
-        # Fila inferior: Vencimientos urgentes y desglose por Método de Pago
         col_b1, col_b2 = st.columns([1.4, 1])
         with col_b1:
             st.subheader("🚨 Próximos Vencimientos Urgentes (≤ 5 días)")
@@ -413,14 +397,12 @@ elif menu == "📲 Control y Botones WhatsApp":
             df = df[df['mes_anio'] == filtro_mes]
         if buscar_txt:
             df = df[
-                df['cliente'].str.contains(buscar_txt, case=False, na=False) |
-                df['correo_cuenta'].str.contains(buscar_txt, case=False, na=False) |
-                df['perfil'].str.contains(buscar_txt, case=False, na=False)
+                df['cliente'].astype(str).str.contains(buscar_txt, case=False, na=False) |
+                df['correo_cuenta'].astype(str).str.contains(buscar_txt, case=False, na=False) |
+                df['perfil'].astype(str).str.contains(buscar_txt, case=False, na=False)
             ]
 
-        btn_cobrar = []
-        btn_accesos = []
-        btn_actualizar = []
+        btn_cobrar, btn_accesos, btn_actualizar = [], [], []
         
         for _, r in df.iterrows():
             tel = ''.join(filter(str.isdigit, str(r['whatsapp'])))
@@ -482,34 +464,17 @@ elif menu == "📲 Control y Botones WhatsApp":
             use_container_width=True
         )
 
-        # Generador rápido de ficha copiable para WhatsApp Web
-        with st.expander("📋 Copiar Ficha de Acceso en 1 Clic (Para pegar en WhatsApp Web)"):
-            cli_sel = st.selectbox("Selecciona cliente para generar texto copiable:", df['codigo_vta'] + " - " + df['cliente'] + " (" + df['plataforma'] + ")")
-            cod_sel = cli_sel.split(" - ")[0]
-            r_copia = df[df['codigo_vta'] == cod_sel].iloc[0]
-            texto_ficha = f"""🎬 *DATOS DE ACCESO - OMNICAST* 🎬
-👤 *Cliente:* {r_copia['cliente']}
-📺 *Servicio:* {r_copia['plataforma']}
-📧 *Correo:* {r_copia['correo_cuenta']}
-🔑 *Contraseña:* {r_copia['clave_acceso']}
-🎭 *Perfil:* {r_copia['perfil']}
-📌 *PIN:* {r_copia['pin']}
-🖥️ *Dispositivo:* {r_copia['dispositivo']}
-📅 *Fecha de Vencimiento:* {r_copia['fecha_vencimiento']}"""
-            st.code(texto_ficha, language="markdown")
-
 # ==========================================
-# MÓDULO 3: REGISTRAR NUEVA VENTA
+# MÓDULO 3: REGISTRAR NUEVA VENTA EN SUPABASE
 # ==========================================
 elif menu == "➕ Registrar Venta / Perfil":
-    st.title("➕ Registrar Nueva Venta de Suscripción")
+    st.title("➕ Registrar Nueva Venta en Supabase")
     df_m = cargar_madres()
     df_v = cargar_ventas()
     
     sig_num = len(df_v) + 1
     cod_sugerido = f"VTA-{sig_num:03d}"
     
-    # Selector inteligente fuera del form para autocompletar clave y plataforma
     if not df_m.empty:
         opciones_madre = ["✍️ Escribir cuenta manualmente..."] + [f"{r['correo_madre']} ({r['plataforma']} | Libres: {r['cupos_libres']})" for _, r in df_m.iterrows()]
         madre_elegida = st.selectbox("⚡ Autocompletar desde Inventario de Cuentas Madre (Opcional):", opciones_madre)
@@ -524,7 +489,7 @@ elif menu == "➕ Registrar Venta / Perfil":
         clave_auto = fila_m['clave_actual']
         plat_auto = fila_m['plataforma'] if fila_m['plataforma'] in PLATAFORMAS else "Netflix"
 
-    with st.form("form_nueva_venta_v4"):
+    with st.form("form_nueva_venta_cloud"):
         col1, col2, col3 = st.columns(3)
         
         with col1:
@@ -551,17 +516,31 @@ elif menu == "➕ Registrar Venta / Perfil":
             costo_prop = st.number_input("Costo Proporcional (S/)", min_value=0.0, value=7.0, step=0.1)
             metodo_pago = st.selectbox("Método de Pago", ["Yape", "Plin", "BCP", "Ligo", "Efectivo", "Transferencia"])
             
-        guardar = st.form_submit_button("✅ Registrar Venta en el Sistema", use_container_width=True)
+        guardar = st.form_submit_button("✅ Guardar Venta en la Nube (Supabase)", use_container_width=True)
         
         if guardar:
             if cliente and whatsapp and len(whatsapp.strip()) >= 9:
                 f_venc = f_venta + timedelta(days=int(duracion_dias))
-                c.execute('''INSERT INTO ventas 
-                    (codigo_vta, cliente, whatsapp, plataforma, correo_cuenta, clave_acceso, perfil, pin, dispositivo, fecha_venta, fecha_vencimiento, precio_venta, costo_prop, metodo_pago, estado_pago, notas_2fa)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                    (codigo_vta, cliente.upper().strip(), whatsapp.strip(), plataforma, correo_cuenta.strip(), clave_acceso.strip(), perfil, pin, dispositivo, str(f_venta), str(f_venc), precio_venta, costo_prop, metodo_pago, "Pagado", notas_2fa))
-                conn.commit()
-                st.success(f"🎉 ¡Venta **{codigo_vta}** registrada para **{cliente.upper()}**! Ganancia neta: **S/ {precio_venta - costo_prop:.2f}**")
+                nuevo_reg = {
+                    "codigo_vta": codigo_vta,
+                    "cliente": cliente.upper().strip(),
+                    "whatsapp": whatsapp.strip(),
+                    "plataforma": plataforma,
+                    "correo_cuenta": correo_cuenta.strip(),
+                    "clave_acceso": clave_acceso.strip(),
+                    "perfil": perfil,
+                    "pin": pin,
+                    "dispositivo": dispositivo,
+                    "fecha_venta": str(f_venta),
+                    "fecha_vencimiento": str(f_venc),
+                    "precio_venta": float(precio_venta),
+                    "costo_prop": float(costo_prop),
+                    "metodo_pago": metodo_pago,
+                    "estado_pago": "Pagado",
+                    "notas_2fa": notas_2fa
+                }
+                supabase.table("ventas").insert(nuevo_reg).execute()
+                st.success(f"🎉 ¡Venta **{codigo_vta}** guardada en Supabase para **{cliente.upper()}**! Ganancia neta: **S/ {precio_venta - costo_prop:.2f}**")
             else:
                 st.error("⚠️ Ingresa el nombre del cliente y un número de WhatsApp válido.")
 
@@ -569,12 +548,12 @@ elif menu == "➕ Registrar Venta / Perfil":
 # MÓDULO 4: INVENTARIO DE CUENTAS MADRE
 # ==========================================
 elif menu == "🏦 Inventario Cuentas Madre":
-    st.title("🏦 Inventario de Cuentas Madre, Perfiles Libres y Proveedores")
+    st.title("🏦 Inventario de Cuentas Madre en Supabase")
     df_m = cargar_madres()
     
     with st.expander("➕ Agregar Nueva Cuenta Madre al Inventario", expanded=False):
         sig_mad = f"MAD-{(len(df_m) + 1):03d}"
-        with st.form("form_madre_v4"):
+        with st.form("form_madre_cloud"):
             c1, c2, c3 = st.columns(3)
             with c1:
                 m_cod = st.text_input("ID Matriz", value=sig_mad)
@@ -589,18 +568,25 @@ elif menu == "🏦 Inventario Cuentas Madre":
                 m_costo = st.number_input("Costo Cuenta Madre (S/)", min_value=0.0, value=7.0, step=0.5)
                 m_notas = st.text_input("Web 2FA / Correo Recuperación", value="https://taikhoan24h.vn")
                 
-            if st.form_submit_button("💾 Guardar Cuenta Madre", use_container_width=True):
+            if st.form_submit_button("💾 Guardar Cuenta Madre en Supabase", use_container_width=True):
                 if m_correo:
                     try:
-                        c.execute('''INSERT INTO cuentas_madre 
-                            (codigo_mad, plataforma, correo_madre, clave_actual, proveedor, fecha_corte, capacidad_cupos, costo_madre, notas_recuperacion)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                            (m_cod, m_plat, m_correo.strip(), m_clave.strip(), m_prov, str(m_corte), m_cupos, m_costo, m_notas))
-                        conn.commit()
-                        st.success("✅ Cuenta Madre registrada correctamente.")
+                        nueva_madre = {
+                            "codigo_mad": m_cod,
+                            "plataforma": m_plat,
+                            "correo_madre": m_correo.strip(),
+                            "clave_actual": m_clave.strip(),
+                            "proveedor": m_prov,
+                            "fecha_corte": str(m_corte),
+                            "capacidad_cupos": int(m_cupos),
+                            "costo_madre": float(m_costo),
+                            "notas_recuperacion": m_notas
+                        }
+                        supabase.table("cuentas_madre").insert(nueva_madre).execute()
+                        st.success("✅ Cuenta Madre guardada en Supabase.")
                         st.rerun()
-                    except sqlite3.IntegrityError:
-                        st.error("⚠️ Ese correo de Cuenta Madre ya está registrado.")
+                    except Exception as e:
+                        st.error(f"⚠️ Error al guardar (verifica que el correo no esté repetido): {e}")
 
     if not df_m.empty:
         st.dataframe(
@@ -630,7 +616,7 @@ elif menu == "🏦 Inventario Cuentas Madre":
 # MÓDULO 5: EDITAR, RENOVAR (+30 DÍAS) O ELIMINAR
 # ==========================================
 elif menu == "🔐 Editar / Renovar / Claves":
-    st.title("🔐 Modificar Accesos o Renovar Suscripción en Tiempo Real")
+    st.title("🔐 Modificar Accesos o Renovar Suscripción en Supabase")
     df = cargar_ventas()
     
     if not df.empty:
@@ -640,20 +626,20 @@ elif menu == "🔐 Editar / Renovar / Claves":
         id_sel = int(seleccion.split(" | ")[0])
         row = df[df['id'] == id_sel].iloc[0]
         
-        # Acciones rápidas en 1 clic
         col_r1, col_r2, col_r3 = st.columns([1, 1, 2])
         with col_r1:
             if st.button("🔄 Renovar +30 Días (1 Clic)", use_container_width=True):
                 nueva_fecha = pd.to_datetime(row['fecha_vencimiento']).date() + timedelta(days=30)
-                c.execute("UPDATE ventas SET fecha_vencimiento=?, fecha_venta=? WHERE id=?", (str(nueva_fecha), str(date.today()), id_sel))
-                conn.commit()
+                supabase.table("ventas").update({
+                    "fecha_vencimiento": str(nueva_fecha),
+                    "fecha_venta": str(date.today())
+                }).eq("id", id_sel).execute()
                 st.success(f"✅ Suscripción renovada hasta el {nueva_fecha}!")
                 st.rerun()
         with col_r2:
             if st.button("🗑️ Eliminar Registro", type="primary", use_container_width=True):
-                c.execute("DELETE FROM ventas WHERE id=?", (id_sel,))
-                conn.commit()
-                st.warning("Registro eliminado.")
+                supabase.table("ventas").delete().eq("id", id_sel).execute()
+                st.warning("Registro eliminado de Supabase.")
                 st.rerun()
 
         st.divider()
@@ -679,20 +665,33 @@ elif menu == "🔐 Editar / Renovar / Claves":
                 metodos = ["Yape", "Plin", "BCP", "Ligo", "Efectivo", "Transferencia"]
                 e_metodo = st.selectbox("Método de Pago", metodos, index=metodos.index(row['metodo_pago']) if row['metodo_pago'] in metodos else 0)
                 
-            if st.form_submit_button("💾 Guardar Todos los Cambios", use_container_width=True):
-                c.execute('''UPDATE ventas SET 
-                    codigo_vta=?, cliente=?, whatsapp=?, plataforma=?, correo_cuenta=?, clave_acceso=?, perfil=?, pin=?, dispositivo=?, fecha_venta=?, fecha_vencimiento=?, precio_venta=?, costo_prop=?, metodo_pago=?, notas_2fa=?
-                    WHERE id=?''',
-                    (e_cod, e_cliente.upper().strip(), e_wa.strip(), e_plat, e_correo.strip(), e_clave.strip(), e_perfil, e_pin, e_disp, str(e_fventa), str(e_fvenc), e_precio, e_costo, e_metodo, e_notas, id_sel))
-                conn.commit()
-                st.success("✅ ¡Datos actualizados en tiempo real!")
+            if st.form_submit_button("💾 Guardar Cambios en Supabase", use_container_width=True):
+                datos_act = {
+                    "codigo_vta": e_cod,
+                    "cliente": e_cliente.upper().strip(),
+                    "whatsapp": e_wa.strip(),
+                    "plataforma": e_plat,
+                    "correo_cuenta": e_correo.strip(),
+                    "clave_acceso": e_clave.strip(),
+                    "perfil": e_perfil,
+                    "pin": e_pin,
+                    "dispositivo": e_disp,
+                    "fecha_venta": str(e_fventa),
+                    "fecha_vencimiento": str(e_fvenc),
+                    "precio_venta": float(e_precio),
+                    "costo_prop": float(e_costo),
+                    "metodo_pago": e_metodo,
+                    "notas_2fa": e_notas
+                }
+                supabase.table("ventas").update(datos_act).eq("id", id_sel).execute()
+                st.success("✅ ¡Datos actualizados en Supabase en tiempo real!")
                 st.rerun()
 
 # ==========================================
 # MÓDULO 6: RESPALDO EN EXCEL / HERRAMIENTAS
 # ==========================================
 elif menu == "⚙️ Respaldo y Herramientas":
-    st.title("⚙️ Exportar a Excel y Respaldo de Base de Datos")
+    st.title("⚙️ Exportar a Excel desde Supabase")
     df_v = cargar_ventas()
     df_m = cargar_madres()
     
