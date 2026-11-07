@@ -20,6 +20,9 @@ st.set_page_config(
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 
+if "menu_activo" not in st.session_state:
+    st.session_state.menu_activo = "📊 Dashboard y Ganancias"
+
 def pantalla_login():
     st.markdown("""
     <style>
@@ -59,30 +62,24 @@ if not st.session_state.autenticado:
     st.stop()
 
 # ==========================================
-# 3. CONEXIÓN A SUPABASE Y PRECARGA INICIAL
+# 3. CONEXIÓN A SUPABASE (CON AUTO-CORRECCIÓN DE URL)
 # ==========================================
 if "SUPABASE_URL" not in st.secrets or "SUPABASE_KEY" not in st.secrets:
-    st.error("⚠️ Falta configurar las credenciales de Supabase en los 'Secrets' de Streamlit Cloud.")
-    st.info("""
-    **Cómo activarlo en 30 segundos:**
-    1. Haz clic en **Manage app** (abajo a la derecha) -> **Settings** -> **Secrets**.
-    2. Pega tus llaves así y dale a **Save**:
-    ```toml
-    SUPABASE_URL = "[https://tu-proyecto.supabase.co](https://tu-proyecto.supabase.co)"
-    SUPABASE_KEY = "tu-clave-anon-public"
-    ```
-    """)
+    st.error("⚠️ Falta configurar SUPABASE_URL y SUPABASE_KEY en los 'Secrets' de Streamlit Cloud.")
     st.stop()
 
-@st.cache_resource
-def iniciar_supabase() -> Client:
-    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+# Limpia automáticamente '/rest/v1/' si fue copiado desde Data API
+URL_LIMPIA = st.secrets["SUPABASE_URL"].strip().split("/rest/v1")[0].rstrip("/")
+KEY_LIMPIA = st.secrets["SUPABASE_KEY"].strip()
 
-supabase = iniciar_supabase()
+@st.cache_resource
+def conectar_supabase_v5(url: str, key: str) -> Client:
+    return create_client(url, key)
+
+supabase = conectar_supabase_v5(URL_LIMPIA, KEY_LIMPIA)
 
 def precargar_datos_supabase():
     try:
-        # 1. Verificar y precargar Cuentas Madre si está vacío
         res_m = supabase.table("cuentas_madre").select("id").limit(1).execute()
         if len(res_m.data) == 0:
             madres_iniciales = [
@@ -98,7 +95,6 @@ def precargar_datos_supabase():
             ]
             supabase.table("cuentas_madre").insert(madres_iniciales).execute()
 
-        # 2. Verificar y precargar Ventas si está vacío
         res_v = supabase.table("ventas").select("id").limit(1).execute()
         if len(res_v.data) == 0:
             ventas_iniciales = [
@@ -114,12 +110,13 @@ def precargar_datos_supabase():
             ]
             supabase.table("ventas").insert(ventas_iniciales).execute()
     except Exception as e:
-        st.warning(f"Verifica haber ejecutado el script SQL en Supabase. Detalle: {e}")
+        st.error(f"⚠️ Aún falta crear las tablas en el SQL Editor de Supabase. Detalle técnico: {e}")
+        st.stop()
 
 precargar_datos_supabase()
 
 # ==========================================
-# 4. MENÚ LATERAL Y SELECTOR DE MODO OSCURO / CLARO
+# 4. MENÚ LATERAL CON BOTONES GRANDES
 # ==========================================
 st.sidebar.markdown("## 🚀 **OmniCast Cloud**")
 st.sidebar.caption("🟢 Conectado a Supabase | Usuario: **lewis123**")
@@ -137,6 +134,7 @@ else:
     sub_card = "#9CA3AF"
     shadow_card = "0 6px 16px rgba(0,0,0,0.35)"
 
+# CSS para tarjetas financieras y BOTONES DE NAVEGACIÓN GRANDES
 st.markdown(f"""
 <style>
     .metric-card {{
@@ -171,22 +169,55 @@ st.markdown(f"""
     .card-blue {{ border-left-color: #3B82F6 !important; }}
     .card-yellow {{ border-left-color: #F59E0B !important; }}
     .card-purple {{ border-left-color: #8B5CF6 !important; }}
+
+    /* Botones grandes en la barra lateral */
+    section[data-testid="stSidebar"] div.stButton > button {{
+        width: 100%;
+        min-height: 54px !important;
+        padding: 12px 16px !important;
+        font-size: 17px !important;
+        font-weight: 700 !important;
+        border-radius: 12px !important;
+        margin-bottom: 6px !important;
+        display: flex !important;
+        justify-content: flex-start !important;
+        text-align: left !important;
+        transition: all 0.2s ease-in-out !important;
+    }}
+    section[data-testid="stSidebar"] div.stButton > button p {{
+        font-size: 16.5px !important;
+        font-weight: 700 !important;
+    }}
+    section[data-testid="stSidebar"] div.stButton > button:hover {{
+        transform: translateX(4px);
+    }}
 </style>
 """, unsafe_allow_html=True)
 
 st.sidebar.divider()
+st.sidebar.markdown("### 🧭 Navegación Principal")
 
-menu = st.sidebar.radio(
-    "Navegación Principal:",
-    [
-        "📊 Dashboard y Ganancias Mensuales",
-        "📲 Control y Botones WhatsApp",
-        "➕ Registrar Venta / Perfil",
-        "🏦 Inventario Cuentas Madre",
-        "🔐 Editar / Renovar / Claves",
-        "⚙️ Respaldo y Herramientas"
-    ]
-)
+OPCIONES_MENU = [
+    "📊 Dashboard y Ganancias",
+    "📲 Control y WhatsApp",
+    "➕ Registrar Venta / Perfil",
+    "🏦 Cuentas Madre y Cupos",
+    "🔐 Editar / Renovar / Claves",
+    "⚙️ Respaldo en Excel"
+]
+
+for item in OPCIONES_MENU:
+    es_activo = (st.session_state.menu_activo == item)
+    if st.sidebar.button(
+        item,
+        key=f"nav_{item}",
+        type="primary" if es_activo else "secondary",
+        use_container_width=True
+    ):
+        st.session_state.menu_activo = item
+        st.rerun()
+
+menu = st.session_state.menu_activo
 
 st.sidebar.divider()
 if st.sidebar.button("🔒 Cerrar Sesión", use_container_width=True):
@@ -205,8 +236,12 @@ MESES_ES = {
 # 5. FUNCIONES DE LECTURA EN SUPABASE
 # ==========================================
 def cargar_ventas():
-    res = supabase.table("ventas").select("*").execute()
-    df = pd.DataFrame(res.data)
+    try:
+        res = supabase.table("ventas").select("*").execute()
+        df = pd.DataFrame(res.data)
+    except Exception:
+        df = pd.DataFrame()
+
     if not df.empty:
         hoy = pd.to_datetime(date.today())
         df['precio_venta'] = pd.to_numeric(df['precio_venta'], errors='coerce').fillna(0.0)
@@ -232,10 +267,14 @@ def cargar_ventas():
     return df
 
 def cargar_madres():
-    res_m = supabase.table("cuentas_madre").select("*").execute()
-    res_v = supabase.table("ventas").select("*").execute()
-    df_m = pd.DataFrame(res_m.data)
-    df_v = pd.DataFrame(res_v.data)
+    try:
+        res_m = supabase.table("cuentas_madre").select("*").execute()
+        res_v = supabase.table("ventas").select("*").execute()
+        df_m = pd.DataFrame(res_m.data)
+        df_v = pd.DataFrame(res_v.data)
+    except Exception:
+        df_m = pd.DataFrame()
+        df_v = pd.DataFrame()
     
     if not df_m.empty:
         hoy = pd.to_datetime(date.today())
@@ -270,7 +309,7 @@ def cargar_madres():
 # ==========================================
 # MÓDULO 1: DASHBOARD Y GANANCIAS MENSUALES
 # ==========================================
-if menu == "📊 Dashboard y Ganancias Mensuales":
+if menu == "📊 Dashboard y Ganancias":
     st.title("📊 Panel de Control Financiero y Ganancias Mensuales")
     df_v = cargar_ventas()
     df_m = cargar_madres()
@@ -370,7 +409,7 @@ if menu == "📊 Dashboard y Ganancias Mensuales":
 # ==========================================
 # MÓDULO 2: CONTROL Y 3 BOTONES WHATSAPP
 # ==========================================
-elif menu == "📲 Control y Botones WhatsApp":
+elif menu == "📲 Control y WhatsApp":
     st.title("📲 Control General de Suscripciones y Botones WhatsApp")
     df = cargar_ventas()
     
@@ -547,7 +586,7 @@ elif menu == "➕ Registrar Venta / Perfil":
 # ==========================================
 # MÓDULO 4: INVENTARIO DE CUENTAS MADRE
 # ==========================================
-elif menu == "🏦 Inventario Cuentas Madre":
+elif menu == "🏦 Cuentas Madre y Cupos":
     st.title("🏦 Inventario de Cuentas Madre en Supabase")
     df_m = cargar_madres()
     
@@ -586,7 +625,7 @@ elif menu == "🏦 Inventario Cuentas Madre":
                         st.success("✅ Cuenta Madre guardada en Supabase.")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"⚠️ Error al guardar (verifica que el correo no esté repetido): {e}")
+                        st.error(f"⚠️ Error al guardar: {e}")
 
     if not df_m.empty:
         st.dataframe(
@@ -690,7 +729,7 @@ elif menu == "🔐 Editar / Renovar / Claves":
 # ==========================================
 # MÓDULO 6: RESPALDO EN EXCEL / HERRAMIENTAS
 # ==========================================
-elif menu == "⚙️ Respaldo y Herramientas":
+elif menu == "⚙️ Respaldo en Excel":
     st.title("⚙️ Exportar a Excel desde Supabase")
     df_v = cargar_ventas()
     df_m = cargar_madres()
